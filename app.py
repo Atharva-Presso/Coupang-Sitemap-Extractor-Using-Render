@@ -1,12 +1,29 @@
 from flask import Flask, request, jsonify, render_template_string
 import psycopg2
 import psycopg2.pool
+from urllib.parse import unquote, quote
 
 app = Flask(__name__)
 
 COCKROACH_CONN = 'postgresql://atharva:S6_SVxa9zMtqQifpCajH5Q@coupang-sitemap-24437.j77.aws-ap-south-1.cockroachlabs.cloud:26257/custom_urls?sslmode=require'
 
 connection_pool = psycopg2.pool.SimpleConnectionPool(1, 10, COCKROACH_CONN)
+
+def normalize_url(url):
+    """Generate multiple URL variants to match against DB"""
+    url = url.strip()
+    variants = set()
+    variants.add(url)
+    try:
+        decoded = unquote(url)
+        variants.add(decoded)
+        re_encoded = quote(decoded, safe=':/?=&%-.~_@!$&\'()*+,;')
+        variants.add(re_encoded)
+        re_encoded_upper = re_encoded.upper()
+        variants.add(re_encoded_upper)
+    except Exception:
+        pass
+    return list(variants)
 
 HTML = '''
 <!DOCTYPE html>
@@ -35,7 +52,6 @@ HTML = '''
     --white: #FFFFFF;
     --border: #EEEEEE;
     --shadow: 0 2px 8px rgba(0,0,0,0.08);
-    --shadow-hover: 0 4px 16px rgba(0,0,0,0.12);
   }
 
   body {
@@ -47,346 +63,82 @@ HTML = '''
     min-height: 100vh;
   }
 
-  /* HEADER */
-  .site-header {
-    background: var(--red);
-    padding: 0;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-  }
+  .site-header { background: var(--red); padding: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
+  .header-inner { max-width: 1200px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+  .logo-text { font-size: 22px; font-weight: 700; color: var(--white); letter-spacing: -0.5px; }
+  .logo-divider { width: 1px; height: 20px; background: rgba(255,255,255,0.4); }
+  .logo-subtitle { font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 500; }
 
-  .header-inner {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 12px 24px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    text-decoration: none;
-  }
-
-  .logo-text {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--white);
-    letter-spacing: -0.5px;
-  }
-
-  .logo-divider {
-    width: 1px;
-    height: 20px;
-    background: rgba(255,255,255,0.4);
-  }
-
-  .logo-subtitle {
-    font-size: 13px;
-    color: rgba(255,255,255,0.85);
-    font-weight: 500;
-  }
-
-  /* BREADCRUMB */
-  .breadcrumb {
-    background: var(--white);
-    border-bottom: 1px solid var(--border);
-    padding: 8px 0;
-  }
-
-  .breadcrumb-inner {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 24px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--gray-600);
-  }
-
+  .breadcrumb { background: var(--white); border-bottom: 1px solid var(--border); padding: 8px 0; }
+  .breadcrumb-inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gray-600); }
   .breadcrumb-inner span { color: var(--gray-400); }
 
-  /* MAIN */
-  .main {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 24px;
-  }
+  .main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 
-  /* PAGE TITLE */
-  .page-title {
-    margin-bottom: 20px;
-  }
+  .page-title { margin-bottom: 20px; }
+  .page-title h1 { font-size: 20px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; }
+  .page-title p { font-size: 13px; color: var(--gray-600); }
 
-  .page-title h1 {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--gray-900);
-    margin-bottom: 4px;
-  }
-
-  .page-title p {
-    font-size: 13px;
-    color: var(--gray-600);
-  }
-
-  /* CARD */
-  .card {
-    background: var(--white);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 24px;
-    margin-bottom: 16px;
-    box-shadow: var(--shadow);
-  }
-
-  .card-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--gray-600);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 12px;
-  }
+  .card { background: var(--white); border: 1px solid var(--border); border-radius: 4px; padding: 24px; margin-bottom: 16px; box-shadow: var(--shadow); }
+  .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-600); margin-bottom: 12px; }
 
   textarea {
-    width: 100%;
-    background: var(--white);
-    border: 1px solid var(--gray-200);
-    border-radius: 4px;
-    color: var(--gray-900);
-    font-family: 'Noto Sans', monospace;
-    font-size: 13px;
-    padding: 12px;
-    resize: vertical;
-    min-height: 140px;
-    outline: none;
-    transition: border-color 0.15s;
-    line-height: 1.6;
+    width: 100%; background: var(--white); border: 1px solid var(--gray-200); border-radius: 4px;
+    color: var(--gray-900); font-family: 'Noto Sans', monospace; font-size: 13px; padding: 12px;
+    resize: vertical; min-height: 140px; outline: none; transition: border-color 0.15s; line-height: 1.6;
   }
-
   textarea:focus { border-color: var(--red); box-shadow: 0 0 0 2px rgba(229,32,39,0.1); }
   textarea::placeholder { color: var(--gray-400); }
 
-  .actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 14px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
+  .actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
 
-  /* BUTTONS */
-  .btn {
-    font-family: 'Noto Sans', sans-serif;
-    font-weight: 600;
-    font-size: 14px;
-    padding: 10px 24px;
-    border-radius: 4px;
-    border: none;
-    cursor: pointer;
-    transition: all 0.15s;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .btn-primary {
-    background: var(--red);
-    color: var(--white);
-  }
-
+  .btn { font-family: 'Noto Sans', sans-serif; font-weight: 600; font-size: 14px; padding: 10px 24px; border-radius: 4px; border: none; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-primary { background: var(--red); color: var(--white); }
   .btn-primary:hover { background: var(--red-dark); }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .btn-secondary {
-    background: var(--white);
-    border: 1px solid var(--gray-200);
-    color: var(--gray-600);
-  }
-
+  .btn-secondary { background: var(--white); border: 1px solid var(--gray-200); color: var(--gray-600); }
   .btn-secondary:hover { border-color: var(--gray-400); color: var(--gray-900); }
-
-  .btn-outline-red {
-    background: var(--white);
-    border: 1px solid var(--red);
-    color: var(--red);
-  }
-
+  .btn-outline-red { background: var(--white); border: 1px solid var(--red); color: var(--red); }
   .btn-outline-red:hover { background: var(--red-light); }
 
-  /* STATS */
-  .stats-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-
-  .stat {
-    background: var(--white);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 20px 24px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    box-shadow: var(--shadow);
-  }
-
-  .stat-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    flex-shrink: 0;
-  }
-
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--white); border: 1px solid var(--border); border-radius: 4px; padding: 20px 24px; display: flex; align-items: center; gap: 16px; box-shadow: var(--shadow); }
+  .stat-icon { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
   .stat.total .stat-icon { background: var(--gray-100); }
   .stat.found .stat-icon { background: var(--green-light); }
   .stat.notfound .stat-icon { background: var(--red-light); }
-
-  .stat-info {}
-  .stat-number {
-    font-size: 28px;
-    font-weight: 700;
-    line-height: 1;
-    margin-bottom: 2px;
-  }
-
+  .stat-number { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 2px; }
   .stat.total .stat-number { color: var(--gray-900); }
   .stat.found .stat-number { color: var(--green); }
   .stat.notfound .stat-number { color: var(--red); }
+  .stat-label { font-size: 12px; color: var(--gray-600); font-weight: 500; }
 
-  .stat-label {
-    font-size: 12px;
-    color: var(--gray-600);
-    font-weight: 500;
-  }
-
-  /* RESULTS */
-  .results-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 14px;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .filter-tabs {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-
-  .tab {
-    font-family: 'Noto Sans', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    padding: 7px 16px;
-    border: none;
-    background: var(--white);
-    color: var(--gray-600);
-    cursor: pointer;
-    transition: all 0.15s;
-    border-right: 1px solid var(--border);
-  }
-
+  .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+  .filter-tabs { display: flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .tab { font-family: 'Noto Sans', sans-serif; font-size: 13px; font-weight: 500; padding: 7px 16px; border: none; background: var(--white); color: var(--gray-600); cursor: pointer; transition: all 0.15s; border-right: 1px solid var(--border); }
   .tab:last-child { border-right: none; }
   .tab.active { background: var(--red); color: var(--white); font-weight: 600; }
   .tab:hover:not(.active) { background: var(--gray-50); color: var(--gray-900); }
 
-  /* RESULT ITEMS */
-  .result-item {
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 14px 16px;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    background: var(--white);
-    transition: box-shadow 0.15s;
-  }
-
-  .result-item:hover { box-shadow: var(--shadow-hover); }
+  .result-item { border: 1px solid var(--border); border-radius: 4px; padding: 14px 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 14px; background: var(--white); }
   .result-item.found { border-left: 3px solid var(--green); }
   .result-item.notfound { border-left: 3px solid var(--red); }
-
-  .status-badge {
-    font-size: 11px;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 2px;
-    flex-shrink: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    white-space: nowrap;
-  }
-
+  .status-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
   .found .status-badge { background: var(--green-light); color: var(--green); border: 1px solid rgba(0,166,80,0.2); }
   .notfound .status-badge { background: var(--red-light); color: var(--red); border: 1px solid rgba(229,32,39,0.2); }
-
   .result-content { flex: 1; min-width: 0; }
-
-  .result-url {
-    font-size: 13px;
-    color: var(--gray-900);
-    word-break: break-all;
-    margin-bottom: 3px;
-    font-family: monospace;
-  }
-
-  .result-meta {
-    font-size: 12px;
-    color: var(--gray-600);
-  }
-
+  .result-url { font-size: 13px; color: var(--gray-900); word-break: break-all; margin-bottom: 3px; font-family: monospace; }
+  .result-meta { font-size: 12px; color: var(--gray-600); }
   .result-meta.found-meta { color: var(--green); }
 
-  /* SPINNER */
-  .spinner {
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    border: 2px solid rgba(255,255,255,0.4);
-    border-top-color: #fff;
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-    vertical-align: middle;
-  }
-
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   #results-section { display: none; }
+  .empty-state { text-align: center; padding: 40px; color: var(--gray-400); font-size: 14px; }
 
-  .empty-state {
-    text-align: center;
-    padding: 40px;
-    color: var(--gray-400);
-    font-size: 14px;
-  }
+  .site-footer { background: var(--white); border-top: 1px solid var(--border); padding: 16px 24px; text-align: center; font-size: 12px; color: var(--gray-600); margin-top: 40px; }
 
-  /* FOOTER */
-  .site-footer {
-    background: var(--white);
-    border-top: 1px solid var(--border);
-    padding: 16px 24px;
-    text-align: center;
-    font-size: 12px;
-    color: var(--gray-600);
-    margin-top: 40px;
-  }
-
-  /* RESPONSIVE */
   @media (max-width: 600px) {
     .stats-row { grid-template-columns: 1fr; }
     .main { padding: 16px; }
@@ -395,32 +147,26 @@ HTML = '''
 </head>
 <body>
 
-<!-- HEADER -->
 <header class="site-header">
   <div class="header-inner">
-    <div class="logo">
-      <span class="logo-text">coupang</span>
-      <div class="logo-divider"></div>
-      <span class="logo-subtitle">Sitemap URL Checker</span>
-    </div>
+    <span class="logo-text">coupang</span>
+    <div class="logo-divider"></div>
+    <span class="logo-subtitle">Sitemap URL Checker</span>
   </div>
 </header>
 
-<!-- BREADCRUMB -->
 <div class="breadcrumb">
   <div class="breadcrumb-inner">
     KuPeng Homepage <span>›</span> Tools <span>›</span> Sitemap URL Checker
   </div>
 </div>
 
-<!-- MAIN -->
 <main class="main">
   <div class="page-title">
     <h1>Sitemap URL Checker</h1>
     <p>Check if URLs exist across all 297 Coupang Taiwan sitemaps — 14.3M+ URLs indexed</p>
   </div>
 
-  <!-- INPUT CARD -->
   <div class="card">
     <div class="card-title">Paste URLs to check — one per line</div>
     <textarea id="url-input" placeholder="https://www.tw.coupang.com/categories/example&#10;https://www.tw.coupang.com/products/example&#10;..."></textarea>
@@ -431,7 +177,6 @@ HTML = '''
     </div>
   </div>
 
-  <!-- RESULTS -->
   <div id="results-section">
     <div class="stats-row">
       <div class="stat total">
@@ -471,7 +216,6 @@ HTML = '''
   </div>
 </main>
 
-<!-- FOOTER -->
 <footer class="site-footer">
   Coupang TW · Sitemap URL Checker · 297 Sitemaps · 14.3M+ URLs · Powered by Botpresso
 </footer>
@@ -587,15 +331,25 @@ def check():
             url = url.strip()
             if not url:
                 continue
-            cur.execute(
-                'SELECT sitemap_source FROM sitemap_urls WHERE url = %s LIMIT 1',
-                (url,)
-            )
-            row = cur.fetchone()
-            if row:
-                results.append({'url': url, 'found': True, 'sitemap_source': row[0]})
+
+            variants = normalize_url(url)
+            found_row = None
+
+            for variant in variants:
+                cur.execute(
+                    'SELECT sitemap_source FROM sitemap_urls WHERE url = %s LIMIT 1',
+                    (variant,)
+                )
+                row = cur.fetchone()
+                if row:
+                    found_row = row
+                    break
+
+            if found_row:
+                results.append({'url': url, 'found': True, 'sitemap_source': found_row[0]})
             else:
                 results.append({'url': url, 'found': False, 'sitemap_source': ''})
+
         cur.close()
     finally:
         connection_pool.putconn(conn)
